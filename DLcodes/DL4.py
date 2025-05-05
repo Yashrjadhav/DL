@@ -2,58 +2,44 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from keras.models import Sequential
+from keras.layers import SimpleRNN, Dense
 
-# Load & scale training data
-train = pd.read_csv('/content/Google_Stock_Price_Train.csv')
+# Load and preprocess dataset
+df = pd.read_csv('/content/Google_Stock_Price_Train.csv')
+df['Close'] = df['Close'].str.replace(',', '').astype(float)
+data = df['Close'].values.reshape(-1, 1)
+
+# Normalize
 scaler = MinMaxScaler()
-scaled_train = scaler.fit_transform(train.iloc[:, 1:2].values)
+scaled_data = scaler.fit_transform(data)
 
-X_train, y_train = [], []
-for i in range(60, len(scaled_train)):
-    X_train.append(scaled_train[i-60:i, 0])
-    y_train.append(scaled_train[i, 0])
-X_train, y_train = np.array(X_train), np.array(y_train)
-X_train = X_train.reshape(-1, 60, 1)
+# Create sequences
+def create_dataset(data, step=60):
+    X = np.array([data[i-step:i, 0] for i in range(step, len(data))])
+    y = data[step:, 0]
+    return X, y
 
-# Plot stock prices
-plt.plot(train['Open'], label='Open')
-plt.title("Google Stock Prices")
-plt.xlabel("Time"), plt.ylabel("Price")
-plt.legend(), plt.show()
+X, y = create_dataset(scaled_data)
+X = X[..., np.newaxis]  # Add third dimension for RNN input
 
-plt.plot(train['Low'], label='Low')
-plt.title("Google Stock Prices")
-plt.xlabel("Time"), plt.ylabel("Price")
-plt.legend(), plt.show()
-
-# Build & train model
+# Build RNN model
 model = Sequential([
-    LSTM(50, return_sequences=True, input_shape=(60, 1)), Dropout(0.2),
-    LSTM(50, return_sequences=True), Dropout(0.2),
-    LSTM(50, return_sequences=True), Dropout(0.2),
-    LSTM(50), Dropout(0.2),
+    SimpleRNN(50, input_shape=(X.shape[1], 1)),
     Dense(1)
 ])
 model.compile(optimizer='adam', loss='mean_squared_error')
-model.fit(X_train, y_train, epochs=100, batch_size=32)
 
-# Prepare test data
-test = pd.read_csv('/content/Google_Stock_Price_Train.csv')
-real_price = test.iloc[:, 1:2].values
-total = pd.concat((train['Open'], test['Open']), axis=0)
-inputs = scaler.transform(total[len(total)-len(test)-60:].values.reshape(-1, 1))
+# Train
+model.fit(X, y, epochs=5, batch_size=32)
 
-X_test = []
-for i in range(60, len(inputs)):
-    X_test.append(inputs[i-60:i, 0])
-X_test = np.array(X_test).reshape(-1, 60, 1)
+# Predict
+predicted = model.predict(X)
+predicted_prices = scaler.inverse_transform(predicted)
+real_prices = scaler.inverse_transform(y.reshape(-1, 1))
 
-# Predict & plot
-predicted = scaler.inverse_transform(model.predict(X_test))
-plt.plot(real_price, color='red', label='Real Price')
-plt.plot(predicted, color='blue', label='Predicted Price')
-plt.title('Google Stock Price Prediction')
-plt.xlabel('Time'), plt.ylabel('Price')
-plt.legend(), plt.show()
+# Plot
+plt.plot(real_prices, label='Real')
+plt.plot(predicted_prices, label='Predicted')
+plt.legend()
+plt.show()
